@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-red: #F40009;
+  --color-brand-red-dark: #C40007;
+  --color-brand-cream: #FFF8F0;
+  --font-sans: "Inter", "Segoe UI", Arial, Helvetica, sans-serif;
+}
+
+body {
+  background-color: var(--color-brand-cream);
+  font-family: var(--font-sans);
+}
+
+/* subtle background wave, echoes the logo motif without copying any
+   trademarked artwork */
+.brand-wave-bg {
+  background-image: radial-gradient(circle at 100% 0%, rgba(244, 0, 9, 0.06), transparent 40%),
+    radial-gradient(circle at 0% 100%, rgba(244, 0, 9, 0.05), transparent 40%);
+}
+
+.card-shadow {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+@keyframes typingBounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+.typing-dot-1 {
+  animation: typingBounce 1.3s infinite ease-in-out both;
+  animation-delay: -0.32s;
+}
+
+.typing-dot-2 {
+  animation: typingBounce 1.3s infinite ease-in-out both;
+  animation-delay: -0.16s;
+}
+
+.typing-dot-3 {
+  animation: typingBounce 1.3s infinite ease-in-out both;
+}
+
+/* Custom smooth scrollbar for chat */
+.chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 9999px;
+}
+.chat-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}

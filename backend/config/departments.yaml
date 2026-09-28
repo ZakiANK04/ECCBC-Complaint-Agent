@@ -1,0 +1,18 @@
+# Map each classification label to a real department contact.
+# Replace the placeholder emails with the real ones ECCBC gives you.
+departments:
+  quality:
+    label: "Quality / Product Issue"
+    contact_email: "quality.rouiba@example-eccbc.dz"
+  logistics:
+    label: "Delivery / Logistics"
+    contact_email: "logistics.rouiba@example-eccbc.dz"
+  billing:
+    label: "Billing / Credit"
+    contact_email: "finance.rouiba@example-eccbc.dz"
+  commercial:
+    label: "Commercial / Client Relations"
+    contact_email: "commercial.rouiba@example-eccbc.dz"
+  other:
+    label: "General / Other"
+    contact_email: "support.rouiba@example-eccbc.dz"
