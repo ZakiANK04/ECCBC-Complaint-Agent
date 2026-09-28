@@ -1,0 +1,6 @@
+{
+  "classification_mode": "hybrid",
+  "lr_confidence_threshold": 0.5,
+  "lr_weight": 0.15,
+  "model_name": "gemini-3-flash-preview"
+}
