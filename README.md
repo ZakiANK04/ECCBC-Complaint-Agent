@@ -1,6 +1,6 @@
 # ECCBC Complaint Assistant — Hybrid AI System
 
-A production-grade prototype for **Theme 1 — Post-Delivery AI Complaint Assistant, RAG System & Automated Routing** developed for **Equatorial Coca-Cola Bottling Company (ECCBC) — Fruital Rouiba Division**.
+A production-grade prototype for My September Internship : ** Post-Delivery AI Complaint Assistant, RAG System & Automated Routing** developed for **Equatorial Coca-Cola Bottling Company (ECCBC) — Fruital Rouiba Division**.
 
 The system features cooperating AI agents with a modern, branded interface:
 - **Agent 1 — Hybrid Complaint Assistant**: Multi-modal triage combining **TF-IDF + Logistic Regression** (classic ML) with **Google Gemini 3 Flash Preview** (LLM), automated grounded RAG replies in French, English, and Algerian Darija, branded PDF ticketing, and real-time automated email dispatch to department routing contacts.
