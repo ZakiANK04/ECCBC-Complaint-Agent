@@ -1,54 +1,96 @@
 """
 Step 1 of the pipeline: build the RAG knowledge base.
 
-Reads every .txt/.md file in data/knowledge_base/, splits it into
-overlapping chunks, and upserts them into a Chroma collection.
-On Vercel the filesystem is read-only, so an in-memory EphemeralClient
-is used. Call /api/knowledge-base/rebuild after deployment to populate it.
+Uses TF-IDF + cosine similarity (scikit-learn) instead of chromadb to keep
+the Vercel bundle under 500 MB — chromadb alone pulls in onnxruntime (~200 MB).
 
-Usage:
-    python -m src.ingest
+Public API is identical to the chromadb version so rag_chain.py and main.py
+need no changes: get_client() returns a client-like object whose
+get_or_create_collection() returns a collection-like object with the same
+count() / query() signatures that rag_chain.retrieve_context() already uses.
 """
-import os
+import csv as _csv
 import pathlib
-import chromadb
+from typing import Optional
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 
-_VERCEL = bool(os.getenv("VERCEL"))
-
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 KB_DIR = BASE_DIR / "data" / "knowledge_base"
-CHROMA_DIR = BASE_DIR / "data" / "chroma_store"
 COLLECTION_NAME = "eccbc_knowledge"
 
-# Single in-memory client reused across warm requests on Vercel
-_vercel_client: chromadb.ClientAPI | None = None
-
-CHUNK_SIZE = 800       # characters per chunk — small enough for precise retrieval
-CHUNK_OVERLAP = 120    # keeps context from being cut mid-idea
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 120
 
 
-def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP):
-    """Naive fixed-size character chunker with overlap. Good enough for a
-    15-day prototype; swap for a sentence/paragraph-aware splitter later
-    if retrieval quality needs improving."""
+class _TFIDFCollection:
+    """Lightweight drop-in replacement for a chromadb collection."""
+
+    def __init__(self):
+        self._vectorizer: Optional[TfidfVectorizer] = None
+        self._matrix = None
+        self._docs: list[str] = []
+
+    def count(self) -> int:
+        return len(self._docs)
+
+    def query(self, query_texts: list[str], n_results: int = 4) -> dict:
+        if not self._docs or self._vectorizer is None:
+            return {"documents": [[]]}
+        import numpy as np
+        q_vec = self._vectorizer.transform([query_texts[0]])
+        scores = cosine_similarity(q_vec, self._matrix)[0]
+        k = min(n_results, len(self._docs))
+        top_idxs = np.argsort(scores)[::-1][:k]
+        results = [self._docs[i] for i in top_idxs if scores[i] > 0]
+        return {"documents": [results]}
+
+    def _build(self, docs: list[str]) -> None:
+        self._docs = docs
+        self._vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=1, sublinear_tf=True)
+        self._matrix = self._vectorizer.fit_transform(docs)
+
+    def delete(self) -> None:
+        self._docs = []
+        self._vectorizer = None
+        self._matrix = None
+
+
+_collection = _TFIDFCollection()
+
+
+class _FakeClient:
+    """Thin wrapper so existing get_client().get_or_create_collection() calls work."""
+
+    def get_or_create_collection(self, name: str) -> _TFIDFCollection:
+        return _collection
+
+    def delete_collection(self, name: str) -> None:
+        _collection.delete()
+
+
+_client = _FakeClient()
+
+
+def get_client() -> _FakeClient:
+    return _client
+
+
+def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     text = text.strip()
     if not text:
         return []
-    chunks = []
-    start = 0
+    chunks, start = [], 0
     while start < len(text):
-        end = start + size
-        chunks.append(text[start:end])
+        chunks.append(text[start:start + size])
         start += size - overlap
     return chunks
 
 
 def read_any(file_path: pathlib.Path) -> str:
-    """Extracts plain text from .txt, .md, .pdf, or .docx files, so real
-    ECCBC documents (usually PDF or Word, not plain text) can be dropped
-    in as-is without manual conversion."""
     suffix = file_path.suffix.lower()
     if suffix in (".txt", ".md"):
         return file_path.read_text(encoding="utf-8", errors="ignore")
@@ -59,56 +101,38 @@ def read_any(file_path: pathlib.Path) -> str:
         doc = DocxDocument(str(file_path))
         return "\n".join(p.text for p in doc.paragraphs)
     if suffix == ".csv":
-        import csv
         lines = []
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                items = [f"{k}: {v.strip()}" for k, v in row.items() if v and v.strip() and v.strip().lower() != "no text provided"]
+            for row in _csv.DictReader(f):
+                items = [f"{k}: {v.strip()}" for k, v in row.items()
+                         if v and v.strip() and v.strip().lower() != "no text provided"]
                 if items:
                     lines.append(" | ".join(items))
         return "\n\n".join(lines)
     raise ValueError(f"Unsupported file type: {file_path.name}")
 
 
-def get_client() -> chromadb.ClientAPI:
-    global _vercel_client
-    if _VERCEL:
-        if _vercel_client is None:
-            _vercel_client = chromadb.EphemeralClient()
-        return _vercel_client
-    return chromadb.PersistentClient(path=str(CHROMA_DIR))
-
-
-def build_index() -> int:
-    """Rebuilds the collection from scratch and returns the number of
-    chunks indexed."""
-    client = get_client()
-    # Start clean each run so edits/removals in knowledge_base are reflected.
-    try:
-        client.delete_collection(COLLECTION_NAME)
-    except Exception:
-        pass
-    collection = client.get_or_create_collection(COLLECTION_NAME)
-
+def build_index(client=None) -> int:
+    """Rebuilds the TF-IDF collection from all files in data/knowledge_base/."""
     files = []
     for ext in ("*.txt", "*.md", "*.pdf", "*.docx", "*.csv"):
         files.extend(sorted(KB_DIR.glob(ext)))
     if not files:
-        print(f"No .txt/.md/.pdf/.docx files found in {KB_DIR}. Add ECCBC documents there first.")
+        print(f"No files found in {KB_DIR}.")
         return 0
 
-    ids, docs, metas = [], [], []
+    _collection.delete()
+    docs = []
     for file_path in files:
-        raw = read_any(file_path)
-        for i, chunk in enumerate(chunk_text(raw)):
-            ids.append(f"{file_path.stem}-{i}")
-            docs.append(chunk)
-            metas.append({"source": file_path.name, "chunk_index": i})
+        try:
+            raw = read_any(file_path)
+            docs.extend(chunk_text(raw))
+        except Exception:
+            pass
 
     if docs:
-        collection.add(ids=ids, documents=docs, metadatas=metas)
-    print(f"Indexed {len(docs)} chunks from {len(files)} file(s) into '{COLLECTION_NAME}'.")
+        _collection._build(docs)
+        print(f"Indexed {len(docs)} chunks from {len(files)} file(s) into '{COLLECTION_NAME}'.")
     return len(docs)
 
 
