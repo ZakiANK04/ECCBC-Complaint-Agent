@@ -2,22 +2,28 @@
 Step 1 of the pipeline: build the RAG knowledge base.
 
 Reads every .txt/.md file in data/knowledge_base/, splits it into
-overlapping chunks, and upserts them into a local, persistent Chroma
-collection. Run this once at the start, and again any time you add or
-change a document in data/knowledge_base/.
+overlapping chunks, and upserts them into a Chroma collection.
+On Vercel the filesystem is read-only, so an in-memory EphemeralClient
+is used. Call /api/knowledge-base/rebuild after deployment to populate it.
 
 Usage:
     python -m src.ingest
 """
+import os
 import pathlib
 import chromadb
 from pypdf import PdfReader
 from docx import Document as DocxDocument
 
+_VERCEL = bool(os.getenv("VERCEL"))
+
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 KB_DIR = BASE_DIR / "data" / "knowledge_base"
 CHROMA_DIR = BASE_DIR / "data" / "chroma_store"
 COLLECTION_NAME = "eccbc_knowledge"
+
+# Single in-memory client reused across warm requests on Vercel
+_vercel_client: chromadb.ClientAPI | None = None
 
 CHUNK_SIZE = 800       # characters per chunk — small enough for precise retrieval
 CHUNK_OVERLAP = 120    # keeps context from being cut mid-idea
@@ -66,6 +72,11 @@ def read_any(file_path: pathlib.Path) -> str:
 
 
 def get_client() -> chromadb.ClientAPI:
+    global _vercel_client
+    if _VERCEL:
+        if _vercel_client is None:
+            _vercel_client = chromadb.EphemeralClient()
+        return _vercel_client
     return chromadb.PersistentClient(path=str(CHROMA_DIR))
 
 

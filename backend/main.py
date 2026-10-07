@@ -46,6 +46,19 @@ from src import storage
 load_dotenv()
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
+_VERCEL = bool(os.getenv("VERCEL"))
+
+
+def _tickets_pdf_dir() -> pathlib.Path:
+    d = pathlib.Path("/tmp/eccbc/data/tickets_pdf") if _VERCEL else BASE_DIR / "data" / "tickets_pdf"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _rca_pdf_dir() -> pathlib.Path:
+    d = pathlib.Path("/tmp/eccbc/data/root_cause_reports") if _VERCEL else BASE_DIR / "data" / "root_cause_reports"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 app = FastAPI(title="ECCBC Complaint Assistant API")
 
@@ -244,7 +257,7 @@ def submit_complaint(payload: ComplaintIn):
     }
 
     # 5. Generate structured PDF ticket (with ECCBC logo)
-    pdf_path = str(BASE_DIR / "data" / "tickets_pdf" / f"{ticket['ticket_id']}.pdf")
+    pdf_path = str(_tickets_pdf_dir() / f"{ticket['ticket_id']}.pdf")
     generate_ticket_pdf(ticket, pdf_path)
     ticket["pdf_path"] = pdf_path
 
@@ -273,7 +286,7 @@ def update_ticket(ticket_id: str, payload: StatusIn):
 
 @app.get("/api/tickets/{ticket_id}/pdf")
 def ticket_pdf(ticket_id: str):
-    path = BASE_DIR / "data" / "tickets_pdf" / f"{ticket_id}.pdf"
+    path = _tickets_pdf_dir() / f"{ticket_id}.pdf"
     if not path.exists():
         raise HTTPException(404, "PDF not found.")
     return FileResponse(path, media_type="application/pdf", filename=path.name)
@@ -291,7 +304,7 @@ def root_cause(payload: RootCauseIn):
 
     generated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     filename = f"root_cause_{datetime.datetime.now():%Y%m%d_%H%M%S}.pdf"
-    pdf_path = str(BASE_DIR / "data" / "root_cause_reports" / filename)
+    pdf_path = str(_rca_pdf_dir() / filename)
     generate_root_cause_pdf(report, generated_at, pdf_path)
 
     return {"report": report.model_dump(), "pdf_filename": filename}
@@ -299,7 +312,7 @@ def root_cause(payload: RootCauseIn):
 
 @app.get("/api/root-cause/pdf/{filename}")
 def root_cause_pdf(filename: str):
-    path = BASE_DIR / "data" / "root_cause_reports" / filename
+    path = _rca_pdf_dir() / filename
     if not path.exists():
         raise HTTPException(404, "PDF not found.")
     return FileResponse(path, media_type="application/pdf", filename=filename)

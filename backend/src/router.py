@@ -2,24 +2,42 @@
 using config/departments.yaml so admins/supervisors can manage contacts directly
 from the Dashboard.
 """
+import os
 import pathlib
+import shutil
+
 import yaml
 
-BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
-CONFIG_PATH = BASE_DIR / "config" / "departments.yaml"
+_VERCEL = bool(os.getenv("VERCEL"))
+_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
+_BUNDLE_CONFIG = _BASE_DIR / "config" / "departments.yaml"
+
+
+def _config_path() -> pathlib.Path:
+    """Return the writable config path, seeding from bundle on Vercel cold start."""
+    if not _VERCEL:
+        return _BUNDLE_CONFIG
+    tmp_path = pathlib.Path("/tmp/eccbc/config/departments.yaml")
+    if not tmp_path.exists():
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        if _BUNDLE_CONFIG.exists():
+            shutil.copy2(_BUNDLE_CONFIG, tmp_path)
+    return tmp_path
 
 
 def load_departments() -> dict:
-    if not CONFIG_PATH.exists():
+    path = _config_path()
+    if not path.exists():
         return {}
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
         return data.get("departments", {})
 
 
 def save_departments(departments: dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    path = _config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump({"departments": departments}, f, allow_unicode=True, sort_keys=False)
 
 
@@ -31,7 +49,6 @@ def get_department_contact(department_key: str) -> dict:
         "emails": ["support.rouiba@example-eccbc.dz"]
     }))
 
-    # Normalize emails list and primary email
     emails = dept.get("emails", [])
     if not emails and dept.get("contact_email"):
         emails = [e.strip() for e in str(dept.get("contact_email")).split(",") if e.strip()]

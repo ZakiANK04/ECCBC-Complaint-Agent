@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+// In development use localhost:8000; in production the API is on the same origin.
+const API_BASE = import.meta.env.DEV
+  ? (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000")
+  : (import.meta.env.VITE_API_BASE_URL || "");
 
 async function request(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {

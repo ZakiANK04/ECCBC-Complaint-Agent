@@ -11,6 +11,7 @@ Features:
 import json
 import os
 import pathlib
+import shutil
 from typing import Literal, Tuple, Dict, Any, Optional
 
 import joblib
@@ -21,10 +22,38 @@ from sklearn.pipeline import Pipeline
 
 from src.classify import ComplaintClassification, classify_complaint
 
+_VERCEL = bool(os.getenv("VERCEL"))
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
-CONFIG_PATH = BASE_DIR / "config" / "agent_config.json"
-MODEL_PATH = BASE_DIR / "data" / "models" / "lr_classifier.joblib"
-TICKETS_PATH = BASE_DIR / "data" / "tickets.json"
+_BUNDLE_CONFIG = BASE_DIR / "config" / "agent_config.json"
+
+
+def _config_path() -> pathlib.Path:
+    if not _VERCEL:
+        return _BUNDLE_CONFIG
+    tmp_path = pathlib.Path("/tmp/eccbc/config/agent_config.json")
+    if not tmp_path.exists():
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        if _BUNDLE_CONFIG.exists():
+            shutil.copy2(_BUNDLE_CONFIG, tmp_path)
+    return tmp_path
+
+
+def _model_path() -> pathlib.Path:
+    if not _VERCEL:
+        return BASE_DIR / "data" / "models" / "lr_classifier.joblib"
+    return pathlib.Path("/tmp/eccbc/data/models/lr_classifier.joblib")
+
+
+def _tickets_path() -> pathlib.Path:
+    if not _VERCEL:
+        return BASE_DIR / "data" / "tickets.json"
+    return pathlib.Path("/tmp/eccbc/data/tickets.json")
+
+
+# Keep module-level aliases for backwards compat with any direct references
+CONFIG_PATH = _config_path()
+MODEL_PATH = _model_path()
+TICKETS_PATH = _tickets_path()
 
 DEFAULT_CONFIG = {
     "classification_mode": "hybrid",       # "hybrid", "llm_only", "lr_only"
