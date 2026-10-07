@@ -32,9 +32,10 @@ def generate_ticket_pdf(ticket: dict, output_path: str) -> str:
     pathlib.Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(output_path, pagesize=A4, topMargin=1.2 * cm, bottomMargin=1.2 * cm)
     story = []
+    is_request = ticket.get("ticket_type") == "request"
 
     text_cells = [
-        Paragraph(f"COMPLAINT TICKET #{ticket['ticket_id']}", styles["TicketTitle"]),
+        Paragraph(f"{'REQUEST' if is_request else 'COMPLAINT'} TICKET #{ticket['ticket_id']}", styles["TicketTitle"]),
         Paragraph(f"Submitted {ticket['created_at']}  ·  Routed to: {ticket['department_label']}", styles["TicketSub"]),
     ]
 
@@ -62,16 +63,17 @@ def generate_ticket_pdf(ticket: dict, output_path: str) -> str:
     story.append(Spacer(1, 14))
 
     fields = [
-        ("Problem type", ticket["problem_type"]),
+        ("Request category" if is_request else "Problem type", ticket["problem_type"]),
         ("Sentiment", ticket["sentiment"].capitalize()),
-        ("Urgency", ticket["urgency"].capitalize()),
-        ("Summary", ticket["summary"]),
     ]
+    if ticket.get("urgency"):
+        fields.append(("Urgency", ticket["urgency"].capitalize()))
+    fields.append(("Summary", ticket["summary"]))
     for label, value in fields:
         story.append(Paragraph(label.upper(), styles["Label"]))
         story.append(Paragraph(value, styles["Body"]))
 
-    story.append(Paragraph("ORIGINAL COMPLAINT", styles["Label"]))
+    story.append(Paragraph("ORIGINAL REQUEST" if is_request else "ORIGINAL COMPLAINT", styles["Label"]))
     clean_complaint = html.escape(ticket["complaint_text"]).replace("\n", "<br/>")
     story.append(Paragraph(clean_complaint, styles["Body"]))
 

@@ -63,9 +63,24 @@ def list_tickets() -> list[dict]:
     return sorted(_load_all(), key=lambda t: t["created_at"], reverse=True)
 
 
-def update_status(ticket_id: str, status: str) -> None:
+def get_ticket(ticket_id: str) -> dict | None:
+    for t in _load_all():
+        if t["ticket_id"] == ticket_id:
+            return t
+    return None
+
+
+def update_status(ticket_id: str, status: str, updated_by: str | None = None) -> bool:
+    """Returns False when the ticket does not exist."""
     tickets = _load_all()
+    found = False
     for t in tickets:
         if t["ticket_id"] == ticket_id:
             t["status"] = status
-    _save_all(tickets)
+            t["status_updated_at"] = datetime.now().isoformat(timespec="seconds")
+            if updated_by:
+                t["status_updated_by"] = updated_by
+            found = True
+    if found:
+        _save_all(tickets)
+    return found

@@ -130,6 +130,30 @@ npm run dev
 ```
 Open `http://localhost:5173/` in your browser.
 
+### Accounts and roles
+
+The app requires sign-in. Three starter accounts are created on first run (stored in `backend/data/users.json`, not committed):
+
+| Role | Username | Password | Access |
+|---|---|---|---|
+| Client | `client` | `Client@2026` | Assistant chat and their own tickets |
+| Employee | `employee` | `Employee@2026` | Dashboard, root cause analysis |
+| Admin | `admin` | `Admin@2026` | Everything, plus settings and account management |
+
+The interface is available in French and English (switch in the sidebar, the top bar and the login screen). French is the source language; English strings live in `frontend/src/lib/en.js`.
+
+The assistant triages every client message (`backend/src/intent.py`):
+
+| Message | What happens |
+|---|---|
+| Complaint | Full pipeline: hybrid classification, ticket, PDF, department e-mail |
+| Request (orders, deliveries) | Ticket of type `request` routed to a department, without urgency; left out of root cause analysis and of ML retraining |
+| Information question | Answered from the knowledge base, no ticket |
+
+Admins can add or remove knowledge-base documents (PDF, DOCX, TXT, MD, CSV) under Settings → Knowledge base; the index is rebuilt on each change. `KB_MAX_UPLOAD_MB` sets the size limit (default 25).
+
+The API enforces the same rules as the UI. Before deploying, set `AUTH_SECRET`, change these passwords (or set `DEMO_*_PASSWORD`), and set `DEMO_ACCOUNTS=false` to stop the login screen from listing them — see `backend/.env.example`.
+
 ---
 
 ## 4. Configuring Real Automated Emails (SMTP)

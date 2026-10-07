@@ -10,6 +10,7 @@ get_or_create_collection() returns a collection-like object with the same
 count() / query() signatures that rag_chain.retrieve_context() already uses.
 """
 import csv as _csv
+import os
 import pathlib
 from typing import Optional
 
@@ -20,6 +21,10 @@ from docx import Document as DocxDocument
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 KB_DIR = BASE_DIR / "data" / "knowledge_base"
+# The deployed bundle is read-only on Vercel, so documents uploaded from the
+# admin screen go to /tmp there and are indexed alongside the bundled ones.
+UPLOAD_DIR = pathlib.Path("/tmp/eccbc/knowledge_base") if os.getenv("VERCEL") else KB_DIR
+SUPPORTED_SUFFIXES = (".txt", ".md", ".pdf", ".docx", ".csv")
 COLLECTION_NAME = "eccbc_knowledge"
 
 CHUNK_SIZE = 800
@@ -112,12 +117,37 @@ def read_any(file_path: pathlib.Path) -> str:
     raise ValueError(f"Unsupported file type: {file_path.name}")
 
 
+def kb_files() -> list[pathlib.Path]:
+    """Every indexable document, bundled and uploaded. An uploaded file
+    replaces a bundled one of the same name."""
+    by_name: dict[str, pathlib.Path] = {}
+    for directory in (KB_DIR, UPLOAD_DIR):
+        if directory.exists():
+            for f in directory.iterdir():
+                if f.is_file() and f.suffix.lower() in SUPPORTED_SUFFIXES:
+                    by_name[f.name] = f
+    return [by_name[name] for name in sorted(by_name)]
+
+
+_index_attempted = False
+
+
+def ensure_index() -> None:
+    """The index lives in memory, so build it once on first use after a
+    restart instead of answering with no reference material."""
+    global _index_attempted
+    if _collection.count() == 0 and not _index_attempted:
+        _index_attempted = True
+        build_index()
+
+
 def build_index(client=None) -> int:
-    """Rebuilds the TF-IDF collection from all files in data/knowledge_base/."""
-    files = []
-    for ext in ("*.txt", "*.md", "*.pdf", "*.docx", "*.csv"):
-        files.extend(sorted(KB_DIR.glob(ext)))
+    """Rebuilds the TF-IDF collection from all knowledge-base documents."""
+    global _index_attempted
+    _index_attempted = True
+    files = kb_files()
     if not files:
+        _collection.delete()
         print(f"No files found in {KB_DIR}.")
         return 0
 

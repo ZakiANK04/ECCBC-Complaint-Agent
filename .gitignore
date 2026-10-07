@@ -17,6 +17,11 @@ backend/data/models/*.joblib
 backend/data/chroma_store/
 *.sqlite3
 
+# Accounts, session secret and SMTP overrides saved from the admin UI
+backend/data/users.json
+backend/data/.auth_secret
+backend/config/smtp_config.json
+
 # Generated PDFs and dynamic ticket storage
 backend/data/tickets_pdf/*.pdf
 backend/data/root_cause_reports/*.pdf

@@ -144,6 +144,9 @@ def get_training_data() -> Tuple[list[str], list[str], list[str]]:
             with open(TICKETS_PATH, "r", encoding="utf-8") as f:
                 tickets = json.load(f)
                 for t in tickets:
+                    # Requests are not complaints: keep them out of the complaint model.
+                    if t.get("ticket_type") == "request":
+                        continue
                     txt = t.get("complaint_text", "").strip()
                     d = t.get("department", "").strip()
                     pt = t.get("problem_type", "").strip()

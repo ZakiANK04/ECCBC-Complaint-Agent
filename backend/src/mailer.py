@@ -2,6 +2,7 @@
 Automated Email Dispatcher for ECCBC Complaints.
 Sends real notifications with the structured PDF report attached to department routing emails.
 """
+import json
 import os
 import smtplib
 import pathlib
@@ -11,8 +12,29 @@ from email.mime.application import MIMEApplication
 from typing import List, Tuple, Dict, Any
 
 
+_VERCEL = bool(os.getenv("VERCEL"))
+_BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
+# Admin overrides saved from the Settings screen. Kept out of git (.gitignore)
+# because it can hold the SMTP password.
+SMTP_OVERRIDES_PATH = (
+    pathlib.Path("/tmp/eccbc/config/smtp_config.json") if _VERCEL else _BASE_DIR / "config" / "smtp_config.json"
+)
+_SMTP_FIELDS = ("enabled", "host", "port", "user", "password", "from_email", "use_tls")
+
+
+def _load_smtp_overrides() -> dict:
+    if not SMTP_OVERRIDES_PATH.exists():
+        return {}
+    try:
+        with open(SMTP_OVERRIDES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 def get_smtp_config() -> dict:
-    return {
+    """Environment variables give the defaults; values saved by an admin win."""
+    config = {
         "enabled": os.getenv("SMTP_ENABLED", "false").lower() in ("true", "1", "yes"),
         "host": os.getenv("SMTP_HOST", "smtp.gmail.com"),
         "port": int(os.getenv("SMTP_PORT", "587")),
@@ -21,6 +43,23 @@ def get_smtp_config() -> dict:
         "from_email": os.getenv("SMTP_FROM", os.getenv("SMTP_USER", "noreply-eccbc@example.com")),
         "use_tls": os.getenv("SMTP_USE_TLS", "true").lower() in ("true", "1", "yes"),
     }
+    config.update({k: v for k, v in _load_smtp_overrides().items() if k in _SMTP_FIELDS})
+    return config
+
+
+def save_smtp_config(changes: dict) -> dict:
+    """Persist admin-provided SMTP settings. An empty password means
+    "keep the current one" so the UI never has to echo it back."""
+    overrides = _load_smtp_overrides()
+    for key in _SMTP_FIELDS:
+        value = changes.get(key)
+        if value is None or (key == "password" and value == ""):
+            continue
+        overrides[key] = value.strip() if isinstance(value, str) else value
+    SMTP_OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(SMTP_OVERRIDES_PATH, "w", encoding="utf-8") as f:
+        json.dump(overrides, f, ensure_ascii=False, indent=2)
+    return get_smtp_config()
 
 
 def send_ticket_notification(
@@ -45,7 +84,9 @@ def send_ticket_notification(
         # If only example emails, don't crash, report gracefully
         return False, "No real external recipient emails found (placeholder @example-eccbc.dz ignored)."
 
-    subject = f"[ECCBC Ticket #{ticket['ticket_id']}] {ticket.get('urgency', 'MEDIUM').upper()} - {ticket.get('problem_type', 'Complaint')} ({ticket.get('department_label', 'Triage')})"
+    is_request = ticket.get("ticket_type") == "request"
+    tag = "REQUEST" if is_request else (ticket.get("urgency") or "medium").upper()
+    subject = f"[ECCBC Ticket #{ticket['ticket_id']}] {tag} - {ticket.get('problem_type', 'Complaint')} ({ticket.get('department_label', 'Triage')})"
 
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
@@ -66,12 +107,12 @@ def send_ticket_notification(
               <strong style="color: #0f172a; font-size: 16px;">Ticket #{ticket['ticket_id']}</strong>
               <div style="margin-top: 6px; font-size: 13px; color: #475569;">
                 <span>Département: <b>{ticket.get('department_label')}</b></span> &bull; 
-                <span>Urgence: <b style="text-transform: uppercase;">{ticket.get('urgency')}</b></span> &bull; 
+                <span>{'Type' if is_request else 'Urgence'}: <b style="text-transform: uppercase;">{'Demande' if is_request else ticket.get('urgency')}</b></span> &bull; 
                 <span>Sentiment: <b>{ticket.get('sentiment')}</b></span>
               </div>
             </div>
 
-            <h3 style="color: #F40009; font-size: 14px; text-transform: uppercase; margin-bottom: 6px;">Réclamation Client</h3>
+            <h3 style="color: #F40009; font-size: 14px; text-transform: uppercase; margin-bottom: 6px;">{'Demande Client' if is_request else 'Réclamation Client'}</h3>
             <p style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; font-size: 14px; white-space: pre-wrap; margin-top: 0;">
               {ticket.get('complaint_text', '')}
             </p>
