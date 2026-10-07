@@ -24,6 +24,7 @@ class MessageTriage(BaseModel):
     category: str               # short label, e.g. "New order", "Delivery date inquiry"
     department: DEPARTMENT_KEYS
     sentiment: Literal["positive", "neutral", "negative"]
+    urgency: Literal["low", "medium", "high"]
     summary: str                # one-sentence neutral summary
 
 
@@ -46,7 +47,11 @@ If a message both reports a problem and asks for something, choose
 "complaint". If unsure between "request" and "information", choose
 "request" when the answer depends on the client's own orders or account.
 
-category: a short English label for the subject (2-4 words).
+category: a short English label for the subject (2-4 words), for a
+complaint the type of problem (e.g. "Damaged product", "Late delivery").
+urgency: how quickly it needs attention. Be conservative: prefer "medium"
+when unsure; "high" for safety issues, contamination, or a client left
+without stock.
 department: who should handle it. Orders usually go to "commercial",
 delivery scheduling to "logistics"; use "other" when unsure.
 summary: one neutral sentence in English."""
@@ -105,6 +110,7 @@ def triage_locally(text: str) -> Tuple[MessageTriage, str]:
         category="Delivery request" if delivery else "Order request" if intent == "request" else "General",
         department="logistics" if delivery else "commercial" if intent == "request" else "other",
         sentiment="neutral",
+        urgency="medium",
         summary=f"Client {intent}: {text.strip()[:140]}",
     )
     return triage, reason

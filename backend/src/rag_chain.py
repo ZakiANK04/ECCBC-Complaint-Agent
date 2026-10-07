@@ -75,9 +75,17 @@ _FRENCH_MARKERS = ("bonjour", "bonsoir", "salut", "merci", "livraison", "command
                    "j'ai", "je ", "nous", "est-ce", "quel", "comment", "pourquoi", "avez")
 
 
+_ENGLISH_MARKERS = (" the ", " and ", " is ", " was ", " were ", " my ", " our ", " we ", " you ", " please",
+                    "hello", "thank", "delivery", "order", "received", "broken", "invoice", "would like", "when ")
+
+
 def _looks_french(text: str) -> bool:
-    low = text.lower()
-    return any(marker in low for marker in _FRENCH_MARKERS)
+    """Language of the canned reply. Clients here write French or Darija far
+    more than English, so French is the default and English must be evident."""
+    low = f" {text.lower()} "
+    if any(marker in low for marker in _FRENCH_MARKERS):
+        return True
+    return sum(marker in low for marker in _ENGLISH_MARKERS) < 2
 
 
 def generate_local_request_reply(text: str) -> str:
@@ -137,8 +145,7 @@ def generate_client_reply(
 
 def generate_local_client_reply(complaint_text: str) -> str:
     """A concise, multilingual-safe response for offline prototype use."""
-    text = complaint_text.lower()
-    if any(marker in text for marker in ("bonjour", "livraison", "facture", "bouteille", "j'ai", "nous")):
+    if _looks_french(complaint_text):
         return (
             "Merci de nous avoir signalé ce problème. Votre réclamation a bien été "
             "enregistrée et transmise à l'équipe concernée pour vérification. "

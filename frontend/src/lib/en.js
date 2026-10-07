@@ -255,6 +255,16 @@ export default {
   "Comptes et rôles": "Accounts and roles",
   "Base de connaissances": "Knowledge base",
   "Configuration indisponible": "Configuration unavailable",
+  "Aucune clé Gemini configurée": "No Gemini key configured",
+  "Le tri, le classement et les réponses utilisent le modèle local et des textes prédéfinis.":
+    "Triage, classification and replies use the local model and predefined texts.",
+  "Quota Gemini dépassé": "Gemini quota exceeded",
+  "Clé Gemini refusée": "Gemini key rejected",
+  "Le modèle de langage ne répond pas": "The language model is not responding",
+  "Depuis le {date}, les réponses envoyées aux clients sont des textes prédéfinis et le classement repose sur le modèle local. Le service reprend automatiquement dès que le modèle répond à nouveau.":
+    "Since {date}, replies sent to clients are predefined texts and classification relies on the local model. Service resumes automatically as soon as the model responds again.",
+  "Modèle de langage opérationnel. Dernier appel réussi le {date}.": "Language model working. Last successful call on {date}.",
+  "Aucun appel au modèle de langage depuis le démarrage du serveur.": "No language-model call since the server started.",
   "Configuration du moteur IA enregistrée.": "AI engine configuration saved.",
   "Modèle local ré-entraîné.": "Local model retrained.",
   "Classification des réclamations": "Complaint classification",

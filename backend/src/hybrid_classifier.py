@@ -259,7 +259,8 @@ def classify_locally(complaint_text: str) -> Tuple[ComplaintClassification, dict
 def classify_hybrid(
     client,
     complaint_text: str,
-    override_config: Optional[dict] = None
+    override_config: Optional[dict] = None,
+    llm_classification: Optional[ComplaintClassification] = None,
 ) -> Tuple[ComplaintClassification, dict]:
     """
     Executes the Hybrid Classification pipeline:
@@ -297,7 +298,10 @@ def classify_hybrid(
         return classification, meta
 
     # 2. Run LLM
-    llm_classification = classify_complaint(client, complaint_text, model=model_name)
+    # The triage step may already have produced the LLM's classification;
+    # only call the model here when it has not.
+    if llm_classification is None:
+        llm_classification = classify_complaint(client, complaint_text, model=model_name)
 
     # 3. Mode: LLM Only
     if mode == "llm_only":

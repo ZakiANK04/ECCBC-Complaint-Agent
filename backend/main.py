@@ -135,6 +135,34 @@ def _kb_filename(filename: str) -> str:
     return name
 
 
+# Outcome of the most recent language-model calls, shown to admins so a
+# quota or key problem is visible instead of silently degrading replies.
+_llm_health = {"last_ok_at": None, "last_error_at": None, "last_error": None, "last_result": None}
+
+
+def _llm(call, *args, **kwargs):
+    """Run one language-model call and record whether it worked."""
+    now = datetime.datetime.now().isoformat(timespec="seconds")
+    try:
+        result = call(*args, **kwargs)
+    except Exception as exc:
+        _llm_health.update(last_error_at=now, last_error=str(exc), last_result="error")
+        raise
+    _llm_health.update(last_ok_at=now, last_result="ok")
+    return result
+
+
+def _llm_error_kind(message: Optional[str]) -> Optional[str]:
+    if not message:
+        return None
+    low = message.lower()
+    if "429" in low or "resource_exhausted" in low or "quota" in low:
+        return "quota"
+    if "api key" in low or "api_key" in low or "401" in low or "403" in low or "permission" in low:
+        return "key"
+    return "other"
+
+
 # ---------------------------------------------------------- access rules --
 any_user = Depends(auth.current_user)
 chat_user = Depends(auth.require_roles("client", "admin"))
@@ -392,6 +420,18 @@ def update_agent_config_endpoint(payload: AgentConfigIn, _: dict = admin_user):
     return {"status": "saved", "config": current}
 
 
+@app.get("/api/agent/status")
+def agent_status(_: dict = admin_user):
+    failing = _llm_health["last_result"] == "error"
+    return {
+        "configured": _genai_client() is not None,
+        "state": {"ok": "ok", "error": "failing"}.get(_llm_health["last_result"], "unknown"),
+        "error_kind": _llm_error_kind(_llm_health["last_error"]) if failing else None,
+        "last_error": (_llm_health["last_error"] or "")[:600] if failing else None,
+        **{k: _llm_health[k] for k in ("last_ok_at", "last_error_at")},
+    }
+
+
 @app.post("/api/agent/retrain")
 def retrain_classifier(_: dict = admin_user):
     stats = train_logistic_models()
@@ -435,14 +475,14 @@ def submit_complaint(payload: ComplaintIn, user: dict = chat_user):
     triage, triage_meta = None, {}
     if client:
         try:
-            triage = triage_message(client, text, model=model_name)
+            triage = _llm(triage_message, client, text, model=model_name)
             triage_meta = {"triage": "llm"}
         except Exception as exc:
             triage_meta = {"triage_fallback_reason": str(exc)}
     if triage is None:
         triage, reason = triage_locally(text)
         triage_meta = {**triage_meta, "triage": f"local_keywords ({reason})"}
-    llm_ok = client is not None and "triage_fallback_reason" not in triage_meta
+    triaged_by_llm = triage_meta.get("triage") == "llm"
 
     # Context retrieval from the knowledge base (brand, ESG, CSV reviews, uploads)
     try:
@@ -454,9 +494,9 @@ def submit_complaint(payload: ComplaintIn, user: dict = chat_user):
     # Information questions are answered directly: nothing to route, no ticket.
     if triage.intent == "information":
         reply = None
-        if llm_ok:
+        if client:
             try:
-                reply = generate_info_reply(client, text, context_chunks, model=model_name)
+                reply = _llm(generate_info_reply, client, text, context_chunks, model=model_name)
             except Exception:
                 reply = None
         return {
@@ -464,6 +504,7 @@ def submit_complaint(payload: ComplaintIn, user: dict = chat_user):
             "ticket_id": None,
             "client_reply": reply or generate_local_info_reply(text),
             "grounded": bool(reply and context_chunks),
+            "generated": bool(reply),
         }
 
     if triage.intent == "request":
@@ -477,38 +518,51 @@ def submit_complaint(payload: ComplaintIn, user: dict = chat_user):
         )
         meta = {"mode": "request_triage", "decision": "request (routed from triage)", **triage_meta}
         reply = None
-        if llm_ok:
+        if client:
             try:
-                reply = generate_request_reply(client, text, context_chunks, model=model_name)
+                reply = _llm(generate_request_reply, client, text, context_chunks, model=model_name)
             except Exception as exc:
                 meta["reply_fallback_reason"] = str(exc)
         reply = reply or generate_local_request_reply(text)
     else:
         # 1. Hybrid classification (TF-IDF + Logistic Regression + Gemini 3 Flash)
-        if llm_ok:
+        # The triage call already returned the LLM's reading of the complaint,
+        # so it is reused here instead of asking the model a second time.
+        llm_reading = None
+        if triaged_by_llm:
+            llm_reading = ComplaintClassification(
+                problem_type=triage.category.strip() or "Complaint",
+                department=triage.department,
+                sentiment=triage.sentiment,
+                urgency=triage.urgency,
+                summary=triage.summary,
+            )
+        if client:
             try:
-                classification, meta = classify_hybrid(client, text)
+                if llm_reading is None and load_agent_config().get("classification_mode") != "lr_only":
+                    classification, meta = _llm(classify_hybrid, client, text)
+                else:
+                    classification, meta = classify_hybrid(client, text, llm_classification=llm_reading)
             except Exception as exc:
                 # A configured key can still be unavailable (offline development,
-                # expired credentials, or provider outage). Ticketing must remain
-                # available for the local prototype in that case.
+                # expired credentials, quota, or provider outage). Ticketing must
+                # remain available in that case.
                 classification, meta = classify_locally(text)
+                meta["decision"] = "local_logistic_regression (LLM unavailable)"
                 meta["llm_fallback_reason"] = str(exc)
         else:
             classification, meta = classify_locally(text)
-            if "triage_fallback_reason" in triage_meta:
-                meta["llm_fallback_reason"] = triage_meta["triage_fallback_reason"]
         meta = {**meta, "triage": triage_meta.get("triage")}
 
-        # 3. Client reply generation
-        if llm_ok and not meta.get("llm_fallback_reason"):
+        # 3. Client reply generation. Tried on its own even if classification
+        # fell back, so one failed call does not degrade the whole answer.
+        reply = None
+        if client:
             try:
-                reply = generate_client_reply(client, text, context_chunks)
+                reply = _llm(generate_client_reply, client, text, context_chunks, model=model_name)
             except Exception as exc:
-                reply = generate_local_client_reply(text)
                 meta["reply_fallback_reason"] = str(exc)
-        else:
-            reply = generate_local_client_reply(text)
+        reply = reply or generate_local_client_reply(text)
 
     is_request = triage.intent == "request"
 
@@ -596,7 +650,10 @@ def root_cause(payload: RootCauseIn, _: dict = staff_user):
     # Root causes are about problems: requests are left out.
     tickets = [t for t in storage.list_tickets() if t.get("ticket_type") != "request"]
     try:
-        report = run_root_cause_analysis(client, tickets, min_count=payload.min_count, top_n=payload.top_n)
+        report = _llm(
+            run_root_cause_analysis, client, tickets, min_count=payload.min_count, top_n=payload.top_n,
+            model=load_agent_config().get("model_name", "gemini-3-flash-preview"),
+        ) if client else run_root_cause_analysis(None, tickets, min_count=payload.min_count, top_n=payload.top_n)
     except Exception:
         report = run_root_cause_analysis(None, tickets, min_count=payload.min_count, top_n=payload.top_n)
 

@@ -143,6 +143,7 @@ export const api = {
   getAgentConfig: () => request("/api/agent/config"),
   updateAgentConfig: (config) => request("/api/agent/config", json("POST", config)),
   retrainAgent: () => request("/api/agent/retrain", { method: "POST" }),
+  getAgentStatus: () => request("/api/agent/status"),
 
   // SMTP configuration & testing
   getEmailConfig: () => request("/api/email/config"),

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Cpu, Database, Mail, Sparkles, Users } from "lucide-react";
 import { api } from "../api";
-import { formatPercent } from "../lib/format";
+import { formatDateTime, formatPercent } from "../lib/format";
 import { Alert, Card, Field, PageHeader, Spinner, useToast } from "../components/ui";
 import EmailSettings from "./settings/EmailSettings";
 import AccountSettings from "./settings/AccountSettings";
@@ -99,6 +99,43 @@ function Slider({ label, value, min, max, step, onChange, disabled, marks }) {
   );
 }
 
+/** Says plainly whether replies currently come from the language model or from the fallback text. */
+function LlmStatus({ status }) {
+  const t = useT();
+  if (!status) return null;
+  if (!status.configured) {
+    return (
+      <Alert tone="warn" title={t("Aucune clé Gemini configurée")}>
+        {t("Le tri, le classement et les réponses utilisent le modèle local et des textes prédéfinis.")}
+      </Alert>
+    );
+  }
+  if (status.state === "failing") {
+    const title =
+      status.error_kind === "quota"
+        ? t("Quota Gemini dépassé")
+        : status.error_kind === "key"
+        ? t("Clé Gemini refusée")
+        : t("Le modèle de langage ne répond pas");
+    return (
+      <Alert tone="crit" title={title}>
+        {t("Depuis le {date}, les réponses envoyées aux clients sont des textes prédéfinis et le classement repose sur le modèle local. Le service reprend automatiquement dès que le modèle répond à nouveau.", {
+          date: formatDateTime(status.last_error_at),
+        })}
+        <span className="block mt-1.5 font-mono text-[11px] opacity-80 break-words">{status.last_error}</span>
+      </Alert>
+    );
+  }
+  if (status.state === "ok") {
+    return (
+      <Alert tone="ok">
+        {t("Modèle de langage opérationnel. Dernier appel réussi le {date}.", { date: formatDateTime(status.last_ok_at) })}
+      </Alert>
+    );
+  }
+  return <Alert tone="info">{t("Aucun appel au modèle de langage depuis le démarrage du serveur.")}</Alert>;
+}
+
 function AiSettings() {
   const t = useT();
   const toast = useToast();
@@ -108,6 +145,11 @@ function AiSettings() {
   const [saving, setSaving] = useState(false);
   const [retraining, setRetraining] = useState(false);
   const [retrainStats, setRetrainStats] = useState(null);
+  const [llm, setLlm] = useState(null);
+
+  useEffect(() => {
+    api.getAgentStatus().then(setLlm, () => setLlm(null));
+  }, []);
 
   const load = useCallback(() => {
     api.getAgentConfig().then(
@@ -161,6 +203,7 @@ function AiSettings() {
 
   return (
     <div className="space-y-4">
+      <LlmStatus status={llm} />
       <form onSubmit={handleSave}>
         <Card
           title={t("Classification des réclamations")}
