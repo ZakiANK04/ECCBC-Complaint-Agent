@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from google import genai
 
 from src.ingest import get_client as get_chroma_client, build_index, COLLECTION_NAME
-from src.rag_chain import retrieve_context, generate_client_reply
+from src.rag_chain import retrieve_context, generate_client_reply, generate_local_client_reply
 from src.pdf_report import generate_ticket_pdf
 from src.router import (
     get_department_contact,
@@ -33,6 +33,7 @@ from src.router import (
 )
 from src.hybrid_classifier import (
     classify_hybrid,
+    classify_locally,
     load_agent_config,
     save_agent_config,
     train_logistic_models
@@ -56,10 +57,10 @@ app.add_middleware(
 )
 
 
-def _genai_client() -> genai.Client:
+def _genai_client() -> Optional[genai.Client]:
     api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise HTTPException(500, "Missing GOOGLE_API_KEY on the server (.env).")
+    if not api_key or api_key == "your_gemini_api_key_here":
+        return None
     return genai.Client(api_key=api_key)
 
 
@@ -189,16 +190,36 @@ def submit_complaint(payload: ComplaintIn):
         raise HTTPException(400, "complaint_text is empty.")
 
     client = _genai_client()
-    collection = _collection()
 
     # 1. Hybrid classification (TF-IDF + Logistic Regression + Gemini 3 Flash)
-    classification, meta = classify_hybrid(client, text)
+    if client:
+        try:
+            classification, meta = classify_hybrid(client, text)
+        except Exception as exc:
+            # A configured key can still be unavailable (offline development,
+            # expired credentials, or provider outage). Ticketing must remain
+            # available for the local prototype in that case.
+            classification, meta = classify_locally(text)
+            meta["llm_fallback_reason"] = str(exc)
+    else:
+        classification, meta = classify_locally(text)
 
     # 2. Context Retrieval from Chroma (reads Brand, ESG, and CSV Reviews)
-    context_chunks = retrieve_context(collection, text)
+    try:
+        context_chunks = retrieve_context(_collection(), text)
+    except Exception:
+        # Knowledge-base indexing is optional for first-run/offline use.
+        context_chunks = []
 
     # 3. Client reply generation
-    reply = generate_client_reply(client, text, context_chunks)
+    if client and not meta.get("llm_fallback_reason"):
+        try:
+            reply = generate_client_reply(client, text, context_chunks)
+        except Exception as exc:
+            reply = generate_local_client_reply(text)
+            meta["reply_fallback_reason"] = str(exc)
+    else:
+        reply = generate_local_client_reply(text)
 
     # 4. Department routing contact
     dept = get_department_contact(classification.department)
@@ -263,7 +284,10 @@ def ticket_pdf(ticket_id: str):
 def root_cause(payload: RootCauseIn):
     client = _genai_client()
     tickets = storage.list_tickets()
-    report = run_root_cause_analysis(client, tickets, min_count=payload.min_count, top_n=payload.top_n)
+    try:
+        report = run_root_cause_analysis(client, tickets, min_count=payload.min_count, top_n=payload.top_n)
+    except Exception:
+        report = run_root_cause_analysis(None, tickets, min_count=payload.min_count, top_n=payload.top_n)
 
     generated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     filename = f"root_cause_{datetime.datetime.now():%Y%m%d_%H%M%S}.pdf"

@@ -196,6 +196,34 @@ def predict_logistic(complaint_text: str) -> dict:
     }
 
 
+def classify_locally(complaint_text: str) -> Tuple[ComplaintClassification, dict]:
+    """Provide a usable offline/demo classification when Gemini is not configured.
+
+    The prototype must still be able to create, route and report tickets on a
+    developer machine without exposing an API key.  This intentionally uses
+    the same locally trained TF-IDF model as ``lr_only`` mode.
+    """
+    lr_result = predict_logistic(complaint_text)
+    text = complaint_text.lower()
+    high_priority_terms = (
+        "urgent", "urgence", "critique", "danger", "verre", "glass",
+        "contamin", "poison", "bless", "hospital", "rayons vides",
+    )
+    urgency = "high" if any(term in text for term in high_priority_terms) else "medium"
+    classification = ComplaintClassification(
+        problem_type=lr_result["problem_type"],
+        department=lr_result["department"],
+        sentiment="negative",
+        urgency=urgency,
+        summary=f"Customer complaint concerning {lr_result['problem_type']}.",
+    )
+    return classification, {
+        "mode": "local_fallback",
+        "decision": "local_logistic_regression (Gemini not configured)",
+        "lr_prediction": lr_result,
+    }
+
+
 def classify_hybrid(
     client,
     complaint_text: str,

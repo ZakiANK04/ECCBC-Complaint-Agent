@@ -94,6 +94,22 @@ def run_root_cause_analysis(
             findings=[],
         )
 
+    if client is None:
+        findings = []
+        for (problem_type, department), cluster_tickets in selected:
+            evidence = [t.get("summary") or t.get("complaint_text", "")[:180] for t in cluster_tickets[:3]]
+            findings.append(RootCauseFinding(
+                cluster_label=f"{problem_type} — {department}",
+                ticket_count=len(cluster_tickets),
+                likely_root_cause="A recurring issue in this complaint category requires operational review.",
+                supporting_evidence=evidence,
+                recommended_action=f"Review the {problem_type.lower()} cases with the {department} team and assign an owner.",
+            ))
+        return RootCauseReport(
+            overall_summary="Local analysis identified repeated complaint categories. Configure Gemini for AI-generated qualitative synthesis.",
+            findings=findings,
+        )
+
     response = client.models.generate_content(
         model=model,
         contents=_build_prompt(selected),

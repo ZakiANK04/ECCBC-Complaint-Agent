@@ -49,3 +49,18 @@ def generate_client_reply(
         ),
     )
     return response.text
+
+
+def generate_local_client_reply(complaint_text: str) -> str:
+    """A concise, multilingual-safe response for offline prototype use."""
+    text = complaint_text.lower()
+    if any(marker in text for marker in ("bonjour", "livraison", "facture", "bouteille", "j'ai", "nous")):
+        return (
+            "Merci de nous avoir signalé ce problème. Votre réclamation a bien été "
+            "enregistrée et transmise à l'équipe concernée pour vérification. "
+            "Un membre de notre équipe vous recontactera dès que possible."
+        )
+    return (
+        "Thank you for reporting this issue. Your complaint has been logged and routed "
+        "to the appropriate team for review. A team member will follow up as soon as possible."
+    )
